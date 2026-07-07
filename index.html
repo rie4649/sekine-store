@@ -259,6 +259,14 @@
     font-family:'Zen Kaku Gothic New',sans-serif;background:#fff;color:var(--ink);
   }
   @media(max-width:640px){ .form-grid{grid-template-columns:1fr} }
+
+  .lock-gate{
+    max-width:360px;margin:60px auto;background:var(--card);color:var(--ink);
+    border-radius:18px;padding:26px;text-align:center;border:1px solid var(--border);
+  }
+  .lock-gate input{
+    width:100%;border:1px solid var(--border);border-radius:10px;padding:11px;margin:14px 0;font-size:15px;
+  }
 </style>
 </head>
 <body>
@@ -266,7 +274,18 @@
 <div class="appbar">
   <button class="appbar-btn" id="backBtn" style="visibility:hidden">← 戻る</button>
   <div class="appbar-title">関根ストア</div>
-  <button class="appbar-btn" id="settingsBtn">⚙ 設定</button>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <button class="appbar-btn" id="installBtn" style="display:none;background:var(--blue);color:#fff;border-radius:999px;padding:8px 14px;">📲 アプリを追加</button>
+    <button class="appbar-btn" id="settingsBtn">⚙ 設定</button>
+  </div>
+</div>
+
+<div id="installHelp" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:14px;padding:22px;max-width:340px;width:100%;text-align:left;">
+    <h3 style="margin:0 0 10px;color:var(--navy);">アプリとして追加する方法</h3>
+    <p id="installHelpText" style="font-size:13px;color:#555;line-height:1.7;"></p>
+    <button id="closeInstallHelp" style="margin-top:14px;width:100%;padding:10px;border:none;border-radius:8px;background:#E9E9EB;font-weight:800;cursor:pointer;font-size:14px;">閉じる</button>
+  </div>
 </div>
 
 <!-- ============ ① ストア画面(一覧) ============ -->
@@ -401,6 +420,71 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const appsCol = db.collection("apps");
 const reviewsCol = db.collection("reviews");
+
+/* ===== アプリとして追加(PWAインストール) ===== */
+if("serviceWorker" in navigator){
+window.addEventListener("load", ()=>{
+navigator.serviceWorker.register("sw.js").catch(()=>{});
+});
+}
+
+let deferredInstallPrompt = null;
+const installBtn = document.getElementById("installBtn");
+let autoPromptTried = false;
+
+async function tryAutoPrompt(){
+if(autoPromptTried || !deferredInstallPrompt) return;
+autoPromptTried = true;
+try{
+deferredInstallPrompt.prompt();
+const choice = await deferredInstallPrompt.userChoice;
+if(choice.outcome === "accepted"){ installBtn.style.display = "none"; }
+deferredInstallPrompt = null;
+}catch(err){ console.error("auto install prompt failed", err); }
+}
+
+window.addEventListener("beforeinstallprompt", (e)=>{
+e.preventDefault();
+deferredInstallPrompt = e;
+installBtn.style.display = "inline-flex";
+tryAutoPrompt();
+});
+
+window.addEventListener("appinstalled", ()=>{
+installBtn.style.display = "none";
+deferredInstallPrompt = null;
+});
+
+function detectManualInstallText(){
+const ua = navigator.userAgent;
+const isMac = /Macintosh/.test(ua);
+const isWin = /Windows/.test(ua);
+const isSafari = /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua);
+if(isSafari && isMac) return "Safariのメニューバーで「ファイル」→「Dockに追加」を選んでください。(Safari 17以降)";
+if(isSafari) return "共有ボタン(□に↑のアイコン)をタップし、「ホーム画面に追加」を選んでください。";
+if(isWin || isMac) return "アドレスバー右端の「インストール」アイコンをクリックしてください。表示されない場合は、ブラウザ右上のメニュー(⋮)から「アプリをインストール」を選んでください。";
+return "ブラウザのメニューから「ホーム画面に追加」または「インストール」を選んでください。";
+}
+
+installBtn.addEventListener("click", async ()=>{
+if(deferredInstallPrompt){
+deferredInstallPrompt.prompt();
+const choice = await deferredInstallPrompt.userChoice;
+deferredInstallPrompt = null;
+if(choice.outcome === "accepted") installBtn.style.display = "none";
+return;
+}
+document.getElementById("installHelpText").textContent = detectManualInstallText();
+document.getElementById("installHelp").style.display = "flex";
+});
+
+document.getElementById("closeInstallHelp").onclick = ()=>{
+document.getElementById("installHelp").style.display = "none";
+};
+
+if(!("onbeforeinstallprompt" in window)){
+installBtn.style.display = "inline-flex";
+}
 
 /* 初期データ(appsコレクションが空の場合だけ、1件だけ登録します) */
 const SEED_APP = {
