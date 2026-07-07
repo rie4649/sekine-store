@@ -33,7 +33,11 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{
     font-family:'Zen Kaku Gothic New', sans-serif;
-    background: var(--bg);
+    background:
+      radial-gradient(circle at 8% 0%, rgba(122,76,255,0.10), transparent 40%),
+      radial-gradient(circle at 95% 10%, rgba(255,95,162,0.12), transparent 40%),
+      radial-gradient(circle at 50% 40%, rgba(62,107,255,0.08), transparent 50%),
+      var(--bg);
     color: var(--ink);
     min-height:100vh;
   }
@@ -66,7 +70,12 @@
     background: linear-gradient(90deg, var(--navy), var(--blue));
     -webkit-background-clip:text;background-clip:text;color:transparent;
   }
-  .hero-sub{color:var(--ink-dim);font-size:16px;margin-top:8px;max-width:44ch}
+  .hero-sub{
+    display:inline-block;margin-top:14px;
+    background:linear-gradient(90deg, #3E6BFF, #7A4CFF);
+    color:#fff;font-weight:800;font-size:13px;letter-spacing:0.04em;
+    padding:7px 16px;border-radius:999px;
+  }
 
   /* ===== 検索 ===== */
   .search-slot{
@@ -244,7 +253,7 @@
   <div class="wrap">
     <div class="hero">
       <div class="hero-title">関根ストア</div>
-      <p class="hero-sub">新作アプリ情報。チームで作ったアプリをここでチェックして、必要なものだけ開いてください。</p>
+      <p class="hero-sub">新作アプリ情報</p>
     </div>
 
     <div class="search-slot">
@@ -255,6 +264,7 @@
     <div id="featuredWrap"></div>
 
     <div class="section-title">すべてのアプリ</div>
+    <div id="loadStatus" style="color:var(--ink-dim);font-size:13px;margin-bottom:10px;">読み込み中…</div>
     <div class="app-list" id="grid"></div>
   </div>
   <div class="wrap"><footer>レビューや設定はチーム全員で共有されます。反映まで数秒かかることがあります。</footer></div>
@@ -410,5 +420,347 @@ let searchTerm = "";
 /* ============================================================
    Firestoreのリアルタイム同期
    ============================================================ */
+const loadStatusEl = document.getElementById("loadStatus");
+let firstSnapshotReceived = false;
+
+const loadTimeoutId = setTimeout(()=>{
+  if(!firstSnapshotReceived){
+    loadStatusEl.textContent = "⚠️ データの読み込みに時間がかかっています。広告ブロッカーなどの拡張機能がFirebaseへの通信をブロックしていないか確認するか、シークレットウィンドウで開いてみてください。";
+    loadStatusEl.style.color = "#B45309";
+  }
+}, 6000);
+
 appsCol.onSnapshot(snapshot=>{
-  APPS =
+  firstSnapshotReceived = true;
+  clearTimeout(loadTimeoutId);
+  loadStatusEl.style.display = "none";
+  APPS = snapshot.docs.map(d=>({ id: d.id, ...d.data() }))
+    .sort((a,b)=> (b.createdAt||0) - (a.createdAt||0)); // 新しい順
+  renderGrid();
+  if(document.getElementById("settingsBody") && !document.getElementById("settingsBody").classList.contains("hidden")){
+    renderManageList();
+  }
+  if(currentAppId && !document.getElementById("detailScreen").classList.contains("hidden")){
+    const app = APPS.find(a=>a.id === currentAppId);
+    if(app) renderDetailStaticPart(app);
+  }
+}, err=>{
+  console.error("apps sync error", err);
+  loadStatusEl.textContent = "⚠️ データの読み込みに失敗しました: " + err.message;
+  loadStatusEl.style.color = "#B91C1C";
+});
+
+/* ============================================================
+   画面遷移
+   ============================================================ */
+function showScreen(name){
+  ["storeScreen","detailScreen","settingsScreen"].forEach(id=>{
+    document.getElementById(id).classList.toggle("hidden", id !== name);
+  });
+  document.getElementById("backBtn").style.visibility = (name === "storeScreen") ? "hidden" : "visible";
+  document.getElementById("settingsBtn").style.visibility = (name === "storeScreen") ? "visible" : "hidden";
+  window.scrollTo(0,0);
+}
+
+document.getElementById("settingsBtn").onclick = ()=> showScreen("settingsScreen");
+document.getElementById("backBtn").onclick = ()=>{
+  if(REVIEWS_UNSUB){ REVIEWS_UNSUB(); REVIEWS_UNSUB = null; }
+  showScreen("storeScreen");
+};
+
+/* ============================================================
+   ストア一覧(新着ヒーロー + 一覧)
+   ============================================================ */
+function isImageUrl(icon){
+  return !!icon && (/^https?:\/\//.test(icon) || icon.endsWith(".png") || icon.endsWith(".svg"));
+}
+
+async function ratingSummaryFor(appId){
+  const snap = await reviewsCol.where("appId","==",appId).get();
+  const ratings = snap.docs.map(d=>d.data().rating || 0);
+  const count = ratings.length;
+  const avg = count ? (ratings.reduce((a,b)=>a+b,0) / count) : 0;
+  return { avg, count };
+}
+
+function starString(avg){
+  const rounded = Math.round(avg);
+  return "★★★★★☆☆☆☆☆".slice(5 - rounded, 10 - rounded);
+}
+
+function renderFeatured(){
+  featuredWrapEl.innerHTML = "";
+  if(APPS.length === 0) return;
+  const app = APPS[0]; // 一番新しく追加されたアプリ
+  const iconInner = isImageUrl(app.icon) ? `<img src="${app.icon}" alt="">` : (app.icon || "🧩");
+
+  const card = document.createElement("button");
+  card.className = "featured";
+  card.type = "button";
+  card.innerHTML = `
+    <div class="featured-eyebrow">NEW — 新着アプリ</div>
+    <div class="featured-body">
+      <div class="featured-icon">${iconInner}</div>
+      <div>
+        <div class="featured-name">${escapeHtml(app.name)}</div>
+        <div class="featured-desc">${escapeHtml(app.description||"")}</div>
+      </div>
+    </div>
+    <div class="featured-btn">開く →</div>
+  `;
+  card.onclick = ()=> openDetail(app.id);
+  featuredWrapEl.appendChild(card);
+}
+
+async function renderGrid(){
+  renderFeatured();
+  const term = searchTerm.trim().toLowerCase();
+  const filtered = APPS.filter(a=>{
+    return !term ||
+      (a.name||"").toLowerCase().includes(term) ||
+      (a.description||"").toLowerCase().includes(term);
+  });
+
+  gridEl.innerHTML = "";
+
+  if(filtered.length === 0){
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "条件に合うアプリが見つかりませんでした。";
+    gridEl.appendChild(empty);
+    return;
+  }
+
+  for(const app of filtered){
+    const row = document.createElement("button");
+    row.className = "app-row";
+    row.type = "button";
+
+    const iconInner = isImageUrl(app.icon) ? `<img src="${app.icon}" alt="">` : (app.icon || "🧩");
+
+    row.innerHTML = `
+      <div class="app-icon">${iconInner}</div>
+      <div class="app-info">
+        <div class="app-name">${escapeHtml(app.name)}</div>
+        <div class="app-stars" data-stars-for="${app.id}">評価を読み込み中…</div>
+        <div class="app-desc">${escapeHtml(app.description||"")}</div>
+      </div>
+      <div class="open-pill">開く</div>
+    `;
+    row.onclick = ()=> openDetail(app.id);
+    gridEl.appendChild(row);
+
+    ratingSummaryFor(app.id).then(({avg,count})=>{
+      const el = row.querySelector(`[data-stars-for="${app.id}"]`);
+      if(el) el.textContent = count ? `${starString(avg)} (${count}件)` : "レビューなし";
+    });
+  }
+}
+
+searchInputEl.addEventListener("input", (e)=>{ searchTerm = e.target.value; renderGrid(); });
+
+/* ============================================================
+   アプリ詳細画面
+   ============================================================ */
+function renderDetailStaticPart(app){
+  document.getElementById("detailIcon").innerHTML = isImageUrl(app.icon) ? `<img src="${app.icon}" alt="">` : (app.icon || "🧩");
+  document.getElementById("detailName").textContent = app.name;
+  document.getElementById("detailDesc").textContent = app.description || "";
+  document.getElementById("detailOpenBtn").onclick = ()=> window.open(app.url, "_blank", "noopener");
+
+  const qrEl = document.getElementById("qrcode");
+  qrEl.innerHTML = "";
+  new QRCode(qrEl, { text: app.url, width: 148, height: 148, colorDark: "#14264A", colorLight: "#ffffff" });
+}
+
+function openDetail(appId){
+  const app = APPS.find(a=>a.id === appId);
+  if(!app) return;
+  currentAppId = appId;
+  selectedStars = 0;
+  renderStarPicker();
+  document.getElementById("reviewAuthor").value = "";
+  document.getElementById("reviewComment").value = "";
+  renderDetailStaticPart(app);
+  watchReviews(appId);
+  showScreen("detailScreen");
+}
+
+function watchReviews(appId){
+  if(REVIEWS_UNSUB) REVIEWS_UNSUB();
+  REVIEWS_UNSUB = reviewsCol.where("appId","==",appId).onSnapshot(snapshot=>{
+    const reviews = snapshot.docs.map(d=>({id:d.id, ...d.data()}))
+      .sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
+    renderReviews(reviews);
+  }, err=>console.error("reviews sync error", err));
+}
+
+function renderReviews(reviews){
+  const count = reviews.length;
+  const avg = count ? reviews.reduce((s,r)=>s + (r.rating||0), 0) / count : 0;
+
+  document.getElementById("ratingBig").textContent = count ? avg.toFixed(1) : "–";
+  document.getElementById("ratingStars").textContent = count ? starString(avg) : "☆☆☆☆☆";
+  document.getElementById("ratingCount").textContent = count ? `${count}件のレビュー` : "レビューはまだありません";
+
+  const listEl = document.getElementById("reviewList");
+  if(count === 0){
+    listEl.innerHTML = `<p class="no-reviews">まだレビューがありません。最初のレビューを書いてみてください。</p>`;
+    return;
+  }
+  listEl.innerHTML = reviews.map(r=>`
+    <div class="review-item">
+      <div class="review-top">
+        <span class="review-author">${escapeHtml(r.author || "匿名")}</span>
+        <span class="review-date">${formatDate(r.createdAt)}</span>
+      </div>
+      <div class="review-stars">${starString(r.rating||0)}</div>
+      <div class="review-comment">${escapeHtml(r.comment||"")}</div>
+    </div>
+  `).join("");
+}
+
+/* ===== 星の手動選択(レビュー投稿時) ===== */
+function renderStarPicker(){
+  const spans = document.querySelectorAll("#starPicker span");
+  spans.forEach(s=>{
+    s.classList.toggle("active", parseInt(s.dataset.v,10) <= selectedStars);
+  });
+}
+document.querySelectorAll("#starPicker span").forEach(s=>{
+  s.onclick = ()=>{ selectedStars = parseInt(s.dataset.v,10); renderStarPicker(); };
+});
+
+document.getElementById("submitReviewBtn").onclick = async ()=>{
+  const author = document.getElementById("reviewAuthor").value.trim() || "匿名";
+  const comment = document.getElementById("reviewComment").value.trim();
+  if(selectedStars === 0){ alert("星の数を選んでください"); return; }
+  if(!comment){ alert("感想を入力してください"); return; }
+  try{
+    await reviewsCol.add({
+      appId: currentAppId,
+      author, rating: selectedStars, comment,
+      createdAt: Date.now()
+    });
+    document.getElementById("reviewComment").value = "";
+    document.getElementById("reviewAuthor").value = "";
+    selectedStars = 0;
+    renderStarPicker();
+  }catch(err){
+    console.error(err);
+    alert("投稿に失敗しました。時間をおいて再試行してください。");
+  }
+};
+
+/* ============================================================
+   設定画面(簡易パスコード → アプリのCRUD)
+   ============================================================ */
+document.getElementById("unlockBtn").onclick = ()=>{
+  const val = document.getElementById("settingsPasscode").value;
+  if(val === SETTINGS_PASSCODE){
+    document.getElementById("lockGate").classList.add("hidden");
+    document.getElementById("settingsBody").classList.remove("hidden");
+    renderManageList();
+  }else{
+    alert("パスコードが違います");
+  }
+};
+
+function renderManageList(){
+  const listEl = document.getElementById("manageList");
+  listEl.innerHTML = "";
+  if(APPS.length === 0){
+    listEl.innerHTML = `<p class="no-reviews">まだアプリが登録されていません</p>`;
+    return;
+  }
+  APPS.forEach(app=>{
+    const row = document.createElement("div");
+    row.className = "manage-row";
+    const iconInner = isImageUrl(app.icon) ? `<img src="${app.icon}" alt="">` : (app.icon || "🧩");
+    row.innerHTML = `
+      <div class="app-icon">${iconInner}</div>
+      <div class="info"><b>${escapeHtml(app.name)}</b><span>${escapeHtml(app.url||"")}</span></div>
+      <div class="manage-actions">
+        <button class="icon-btn-sm" style="background:#E9E9EB;color:var(--ink)" data-act="edit">編集</button>
+        <button class="icon-btn-sm" style="background:var(--danger);color:#fff" data-act="delete">削除</button>
+      </div>
+    `;
+    row.querySelector('[data-act="edit"]').onclick = ()=> startEdit(app);
+    row.querySelector('[data-act="delete"]').onclick = ()=> deleteApp(app);
+    listEl.appendChild(row);
+  });
+}
+
+function startEdit(app){
+  editingAppId = app.id;
+  document.getElementById("formTitle").textContent = `「${app.name}」を編集`;
+  document.getElementById("fName").value = app.name || "";
+  document.getElementById("fDescription").value = app.description || "";
+  document.getElementById("fUrl").value = app.url || "";
+  document.getElementById("fIcon").value = app.icon || "";
+  document.getElementById("cancelEditBtn").classList.remove("hidden");
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+document.getElementById("cancelEditBtn").onclick = resetForm;
+
+function resetForm(){
+  editingAppId = null;
+  document.getElementById("formTitle").textContent = "新しいアプリを追加";
+  ["fName","fDescription","fUrl","fIcon"].forEach(id=>document.getElementById(id).value = "");
+  document.getElementById("cancelEditBtn").classList.add("hidden");
+}
+
+document.getElementById("saveAppBtn").onclick = async ()=>{
+  const data = {
+    name: document.getElementById("fName").value.trim(),
+    description: document.getElementById("fDescription").value.trim(),
+    url: document.getElementById("fUrl").value.trim(),
+    icon: document.getElementById("fIcon").value.trim()
+  };
+  if(!data.name || !data.url){ alert("アプリ名とURLは必須です"); return; }
+  try{
+    if(editingAppId){
+      await appsCol.doc(editingAppId).set(data, {merge:true});
+    }else{
+      data.createdAt = Date.now();
+      await appsCol.add(data);
+    }
+    resetForm();
+  }catch(err){
+    console.error(err);
+    alert("保存に失敗しました。時間をおいて再試行してください。");
+  }
+};
+
+async function deleteApp(app){
+  if(!confirm(`「${app.name}」を削除しますか？(レビューも消えます)`)) return;
+  try{
+    await appsCol.doc(app.id).delete();
+    const reviewsSnap = await reviewsCol.where("appId","==",app.id).get();
+    const batch = db.batch();
+    reviewsSnap.forEach(doc=>batch.delete(doc.ref));
+    await batch.commit();
+  }catch(err){
+    console.error(err);
+    alert("削除に失敗しました。時間をおいて再試行してください。");
+  }
+}
+
+/* ============================================================
+   ユーティリティ
+   ============================================================ */
+function escapeHtml(str){
+  const div = document.createElement("div");
+  div.textContent = str == null ? "" : str;
+  return div.innerHTML;
+}
+
+function formatDate(ms){
+  if(!ms) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+}
+</script>
+</body>
+</html>
