@@ -474,7 +474,8 @@
 <div id="settingsScreen" class="screen hidden">
   <div class="wrap">
     <div id="settingsBody">
-      <h1 style="font-size:24px;margin:24px 0 16px">設定 — アプリの管理</h1>
+      <h1 style="font-size:24px;margin:24px 0 8px">設定 — アプリの管理</h1>
+      <p style="font-size:13px;color:#666;margin:0 0 16px;line-height:1.7">「非表示にする」を押したアプリは、関根ストアの一覧に出なくなります(アプリ本体とデータはそのまま)。非表示のアプリは、ここの「開く」から開けます。</p>
       <div id="manageList"></div>
 
       <div class="form-card">
@@ -519,7 +520,14 @@ const firebaseConfig = {
   appId: "1:781856496751:web:e2e1e5de4cd803415a819a"
 };
 
-/* 設定画面はパスコードなしで誰でも開けます */
+/* 設定画面はパスコードで開きます(2026-10)。パスコードを変えるときは下の文字を書き換えてください
+   ※ 一覧から見えなくするための簡易的な鍵です(アプリ本体のURLを知っている人は開けます) */
+const SETTINGS_PASSCODE = "sekine2026";
+const UNLOCK_KEY = "sekineStoreUnlocked";
+function isUnlocked(){ try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch(e){ return false; } }
+function setUnlocked(){ try { sessionStorage.setItem(UNLOCK_KEY, "1"); } catch(e){} }
+// 一覧に出すアプリ(「非表示」にしたアプリは出さない)
+const visibleApps = () => APPS.filter(a => !a.hidden);
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -672,7 +680,15 @@ function showScreen(name){
   window.scrollTo(0,0);
 }
 
-document.getElementById("settingsBtn").onclick = ()=>{ showScreen("settingsScreen"); renderManageList(); };
+document.getElementById("settingsBtn").onclick = ()=>{
+  if(!isUnlocked()){
+    const v = prompt("設定を開くパスコードを入力してください");
+    if(v === null) return;
+    if(v.trim() !== SETTINGS_PASSCODE){ alert("パスコードが違います"); return; }
+    setUnlocked();   // このタブを閉じるまでは聞き直しません
+  }
+  showScreen("settingsScreen"); renderManageList();
+};
 document.getElementById("backBtn").onclick = ()=>{
   if(REVIEWS_UNSUB){ REVIEWS_UNSUB(); REVIEWS_UNSUB = null; }
   showScreen("storeScreen");
@@ -700,8 +716,9 @@ function starString(avg){
 
 function renderFeatured(){
   featuredWrapEl.innerHTML = "";
-  if(APPS.length === 0) return;
-  const app = APPS.reduce((newest, a)=> (a.createdAt||0) > (newest.createdAt||0) ? a : newest, APPS[0]);
+  const list = visibleApps();
+  if(list.length === 0) return;
+  const app = list.reduce((newest, a)=> (a.createdAt||0) > (newest.createdAt||0) ? a : newest, list[0]);
   const iconInner = isImageUrl(app.icon) ? `<img src="${app.icon}" alt="">` : (app.icon || "🧩");
 
   const card = document.createElement("button");
@@ -725,7 +742,7 @@ function renderFeatured(){
 async function renderGrid(){
   renderFeatured();
   const term = searchTerm.trim().toLowerCase();
-  const filtered = APPS.filter(a=>{
+  const filtered = visibleApps().filter(a=>{
     return !term ||
       (a.name||"").toLowerCase().includes(term) ||
       (a.description||"").toLowerCase().includes(term);
@@ -883,8 +900,10 @@ function renderManageList(){
         <button class="icon-btn-sm reorder-btn" data-act="down" ${idx===APPS.length-1 ? "disabled" : ""}>▼</button>
       </div>
       <div class="app-icon">${iconInner}</div>
-      <div class="info"><b>${escapeHtml(app.name)}</b><span>${escapeHtml(app.url||"")}</span></div>
+      <div class="info"><b>${escapeHtml(app.name)}${app.hidden ? ' <span style="display:inline-block;font-size:11px;font-weight:700;background:#E9E9EB;color:#555;border-radius:6px;padding:2px 7px;margin-left:4px;vertical-align:middle">非表示中</span>' : ""}</b><span>${escapeHtml(app.url||"")}</span></div>
       <div class="manage-actions">
+        ${app.hidden && app.url ? `<button class="icon-btn-sm" style="background:#E9E9EB;color:var(--ink)" data-act="open">開く</button>` : ""}
+        <button class="icon-btn-sm" style="background:${app.hidden ? "#1D4ED8" : "#E9E9EB"};color:${app.hidden ? "#fff" : "var(--ink)"}" data-act="hide">${app.hidden ? "表示する" : "非表示にする"}</button>
         <button class="icon-btn-sm" style="background:#E9E9EB;color:var(--ink)" data-act="edit">編集</button>
         <button class="icon-btn-sm" style="background:var(--danger);color:#fff" data-act="delete">削除</button>
       </div>
@@ -892,9 +911,19 @@ function renderManageList(){
     row.querySelector('[data-act="up"]').onclick = ()=> moveApp(app, -1);
     row.querySelector('[data-act="down"]').onclick = ()=> moveApp(app, 1);
     row.querySelector('[data-act="edit"]').onclick = ()=> startEdit(app);
+    row.querySelector('[data-act="hide"]').onclick = ()=> toggleHidden(app);
+    const openBtn = row.querySelector('[data-act="open"]'); if(openBtn) openBtn.onclick = ()=> window.open(app.url, "_blank");
     row.querySelector('[data-act="delete"]').onclick = ()=> deleteApp(app);
     listEl.appendChild(row);
   });
+}
+
+// 「非表示」: 関根ストアの一覧・新着に出さない(アプリ本体とデータはそのまま)
+async function toggleHidden(app){
+  const hide = !app.hidden;
+  if(hide && !confirm(`「${app.name}」を一覧から非表示にします。\nアプリ本体とデータはそのまま残ります。\n(設定画面の「開く」か、ホーム画面のアイコンから開けます)`)) return;
+  try{ await appsCol.doc(app.id).set({ hidden: hide }, { merge: true }); }
+  catch(err){ console.error(err); alert("変更に失敗しました。時間をおいて再試行してください。"); }
 }
 
 async function moveApp(app, direction){
