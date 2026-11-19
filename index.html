@@ -14,6 +14,7 @@
 <!-- ==== Firebase (みんなでデータを共有するための仕組み) ==== -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://rie4649.github.io/sekine-store/sekine-auth.js?v=1"></script>
 <script>
 /* ===== Firebase読み取り節約(通信の自動休止・再開) 2026-10 =====
    ・画面が見えていない(別タブ・最小化・スマホのスリープ)状態が5分続いたら、リアルタイム監視を止めます
@@ -378,7 +379,7 @@
 
 <div class="appbar">
   <button class="appbar-btn" id="backBtn" style="visibility:hidden">← 戻る</button>
-  <div class="appbar-title">関根ストア</div>
+  <div class="appbar-title">関根ストア <small style="font-size:11px;opacity:.6;font-weight:normal;">版 11/19-1</small></div>
   <div style="display:flex;align-items:center;gap:6px;">
     <button class="appbar-btn" id="installBtn" style="display:none;background:var(--blue);color:#fff;border-radius:999px;padding:8px 14px;">📲 アプリを追加</button>
     <button class="appbar-btn" id="settingsBtn">⚙ 設定</button>
@@ -474,7 +475,7 @@
 <div id="settingsScreen" class="screen hidden">
   <div class="wrap">
     <div id="settingsBody">
-      <h1 style="font-size:24px;margin:24px 0 8px">設定 — アプリの管理</h1>
+      <h1 style="font-size:24px;margin:24px 0 8px">設定 — アプリの管理 <small style="font-size:11px;opacity:.6;font-weight:normal;margin-left:6px;">版 11/19-1</small></h1>
       <p style="font-size:13px;color:#666;margin:0 0 16px;line-height:1.7">「非表示にする」を押したアプリは、関根ストアの一覧に出なくなります(アプリ本体とデータはそのまま)。非表示のアプリは、ここの「開く」から開けます。</p>
       <div id="manageList"></div>
 
