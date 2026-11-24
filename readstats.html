@@ -34,11 +34,11 @@
   .hl span{ flex:1; text-align:center; }
   .grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   @media (max-width:720px){ .grid{ grid-template-columns:1fr; } td.bar{ width:30%; } }
-  #msg{ color:#666; }
+  #msg{ color:#666; overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
-<header><h1>読み取り回数しらべ <small>版 11/24-1</small></h1></header>
+<header><h1>読み取り回数しらべ <small>版 11/24-2</small></h1></header>
 <main>
   <div class="card note">
     関根ストアの各アプリが、Firestore を何回読んだかの記録です（鍵の部品 版 11/24-2 から記録）。<br>
@@ -86,8 +86,11 @@ function render(){
 }
 async function load(){
   try {
-    const s = await db.collection("readStats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(14).get();
-    days = s.docs.map(x => ({ id:x.id, ...x.data() }));
+    // 14日前から今日まで(並べかえは画面の中でする。Firestore の「索引」を作らなくていいように)
+    const from = new Date(Date.now() + 9*3600000 - 13*86400000).toISOString().slice(0, 10);
+    const s = await db.collection("readStats").where(firebase.firestore.FieldPath.documentId(), ">=", from).get()
+      .catch(() => db.collection("readStats").get());   // うまくいかないときは全部読む(1日1件なので少ない)
+    days = s.docs.map(x => ({ id:x.id, ...x.data() })).sort((a, b) => b.id.localeCompare(a.id));
     document.getElementById("msg").textContent = days.length ? "" : "まだ記録がありません。各アプリを使うと、5分ごとに記録されます。";
     document.getElementById("days").innerHTML = days.map((d, i) => '<button onclick="cur=' + i + ';render()">' + esc(d.id.slice(5).replace("-", "/")) + '</button>').join("") +
       '<button onclick="load()">最新にする</button>';
