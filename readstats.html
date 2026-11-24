@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>読み取り回数しらべ</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://rie4649.github.io/sekine-store/sekine-auth.js?v=2"></script>
+<style>
+  :root{ --navy:#14264A; --line:#dde3ec; --bg:#f4f6fa; --warn:#c2410c; --bar:#3b82f6; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif; background:var(--bg); color:#1f2937; }
+  header{ background:var(--navy); color:#fff; padding:14px 16px; }
+  header h1{ margin:0; font-size:20px; }
+  header small{ font-size:11px; opacity:.7; margin-left:6px; font-weight:normal; }
+  main{ max-width:980px; margin:0 auto; padding:16px; }
+  .card{ background:#fff; border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .card h2{ font-size:16px; margin:0 0 10px; }
+  .note{ font-size:13px; color:#555; line-height:1.7; }
+  .days{ display:flex; gap:6px; flex-wrap:wrap; }
+  .days button{ border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 10px; font-size:14px; cursor:pointer; }
+  .days button.on{ background:var(--navy); color:#fff; border-color:var(--navy); }
+  .big{ font-size:28px; font-weight:bold; }
+  .big.over{ color:var(--warn); }
+  table{ width:100%; border-collapse:collapse; font-size:14px; }
+  td,th{ padding:6px 4px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
+  td.n{ text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; width:90px; }
+  td.bar{ width:38%; }
+  .b{ height:12px; background:var(--bar); border-radius:3px; min-width:2px; }
+  .hours{ display:flex; align-items:flex-end; gap:3px; height:120px; border-bottom:1px solid var(--line); }
+  .hours div{ flex:1; background:var(--bar); border-radius:3px 3px 0 0; position:relative; }
+  .hl{ display:flex; gap:3px; font-size:10px; color:#666; }
+  .hl span{ flex:1; text-align:center; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:720px){ .grid{ grid-template-columns:1fr; } td.bar{ width:30%; } }
+  #msg{ color:#666; }
+</style>
+</head>
+<body>
+<header><h1>読み取り回数しらべ <small>版 11/24-1</small></h1></header>
+<main>
+  <div class="card note">
+    関根ストアの各アプリが、Firestore を何回読んだかの記録です（鍵の部品 版 11/24-2 から記録）。<br>
+    無料の枠は <b>1日5万回</b>（夕方5時に元に戻ります）。多いアプリ・コレクションから直していきます。<br>
+    ※だいたいの数です。スタックのまとめコピー（毎朝 約4,000回）は入っていません。
+  </div>
+  <div class="card"><div class="days" id="days"></div><div id="msg">読み込み中…</div></div>
+  <div id="out"></div>
+</main>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyD99Mx0MnGplSQjV7830bS7-gdCBSM9DGY",
+  authDomain: "sekine-store.firebaseapp.com",
+  projectId: "sekine-store",
+  storageBucket: "sekine-store.firebasestorage.app",
+  messagingSenderId: "781856496751",
+  appId: "1:781856496751:web:e2e1e5de4cd803415a819a"
+});
+const db = firebase.firestore();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const fmt = n => Math.round(n || 0).toLocaleString("ja-JP");
+const nice = k => k.replace(/／/g, " / ").replace(/_html/g, ".html").replace(/_js/g, ".js");
+let days = [], cur = 0;
+function table(title, obj, limit){
+  const rows = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, limit || 15);
+  if (!rows.length) return '<div class="card"><h2>' + title + '</h2><div class="note">まだ記録がありません</div></div>';
+  const max = rows[0][1] || 1;
+  return '<div class="card"><h2>' + title + '</h2><table>' + rows.map(([k, v]) =>
+    '<tr><td>' + esc(nice(k)) + '</td><td class="bar"><div class="b" style="width:' + (v / max * 100).toFixed(1) + '%"></div></td><td class="n">' + fmt(v) + '</td></tr>').join("") + '</table></div>';
+}
+function render(){
+  const d = days[cur]; if (!d) return;
+  document.querySelectorAll("#days button").forEach((b, i) => b.classList.toggle("on", i === cur));
+  const h = d.h || {}, hmax = Math.max(1, ...Object.values(h));
+  let hb = '<div class="hours">', hl = '<div class="hl">';
+  for (let i = 0; i < 24; i++){ const v = h[i] || 0; hb += '<div title="' + i + '時 ' + fmt(v) + '回" style="height:' + (v / hmax * 100).toFixed(1) + '%"></div>'; hl += '<span>' + (i % 3 ? "" : i) + '</span>'; }
+  hb += '</div>'; hl += '</div>';
+  const over = (d.total || 0) > 50000;
+  document.getElementById("out").innerHTML =
+    '<div class="card"><h2>' + esc(d.id) + ' の合計</h2><div class="big' + (over ? " over" : "") + '">' + fmt(d.total) + ' 回</div>' +
+    '<div class="note">' + (over ? "無料の枠（5万回）を超えています" : "無料の枠（5万回）の " + Math.round((d.total || 0) / 500) + "%") + '</div></div>' +
+    '<div class="card"><h2>時間ごと</h2>' + hb + hl + '</div>' +
+    '<div class="grid">' + table("アプリ（ページ）ごと", d.p) + table("コレクションごと", d.c) + '</div>' +
+    table("ページ × コレクション（多い順）", d.pc, 25);
+}
+async function load(){
+  try {
+    const s = await db.collection("readStats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(14).get();
+    days = s.docs.map(x => ({ id:x.id, ...x.data() }));
+    document.getElementById("msg").textContent = days.length ? "" : "まだ記録がありません。各アプリを使うと、5分ごとに記録されます。";
+    document.getElementById("days").innerHTML = days.map((d, i) => '<button onclick="cur=' + i + ';render()">' + esc(d.id.slice(5).replace("-", "/")) + '</button>').join("") +
+      '<button onclick="load()">最新にする</button>';
+    render();
+  } catch(e){ document.getElementById("msg").textContent = "読み込めませんでした（" + (e && e.message || e) + "）"; }
+}
+load();
+</script>
+</body>
+</html>
